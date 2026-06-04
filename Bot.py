@@ -935,6 +935,7 @@ async def dep_ton(callback: types.CallbackQuery):
 
 @dp.callback_query(F.data == "withdraw")
 async def withdraw(callback: types.CallbackQuery):
+    user_id = callback.from_user.id
     lang = user_data[callback.from_user.id]['lang']
     
     total_balance = 0.0
