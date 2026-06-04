@@ -169,7 +169,8 @@ RU_TEXTS = {
         "📞 Поддержка: @GiftGuarantorsmanager"
     ),
     "deposit_card_unavailable": "❌ Пополнение картой временно недоступно.",
-    "withdraw_unavailable": "💸 Заявка на вывод принята! ✅\n\n⏳ Обработка до 12 часов.\n📩 Средства придут на указанные реквизиты.\n⚠️ Не создавайте повторные заявки.\n\n🙏 Спасибо! 💙",
+    "withdraw_limit": "❌ Недостаточно средств на балансе.",
+    "withdraw_unavailable": "💸 Вывод средств 💸\n\n✅ Система вывода средств активна.\n\n⏳ Обработка операций занимает до 12 часов.\n\n📩 После обработки средства будут отправлены на указанные реквизиты.\n\n💎 GiftGuarant",
     "dep_card_button": "💳 Банковская карта",
     "dep_ton_button": "💎 TON",
     "not_specified": "Не указан",
@@ -935,6 +936,16 @@ async def dep_ton(callback: types.CallbackQuery):
 @dp.callback_query(F.data == "withdraw")
 async def withdraw(callback: types.CallbackQuery):
     lang = user_data[callback.from_user.id]['lang']
+    
+    total_balance = 0.0
+    for cur_code in CURRENCIES.keys():
+        balance = user_data[user_id].get(f'balance_{cur_code.lower()}', 0.0)
+        total_balance += balance
+    
+    if total_balance <= 0:
+        await callback.answer(get_text(lang, "withdraw_limit"), show_alert=True)
+        return
+        
     await callback.answer(get_text(lang, "withdraw_unavailable"), show_alert=True)
 
 @dp.callback_query(F.data == "my_deals")
