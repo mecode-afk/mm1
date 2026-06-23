@@ -54,7 +54,7 @@ RU_TEXTS = {
         "🎁 Надёжный сервис для безопасных сделок!\n"
         "✨ Автоматизировано, быстро и без лишних хлопот!\n\n"
         "<blockquote>💎 комиссия за услугу 1%\n"
-        "💎поддержка 24/7: @GiftGuarantorsmanager</blockquote>\n\n"
+        "💎поддержка 24/7: @GiftGuarantormanager</blockquote>\n\n"
         "🛡️ Теперь ваши сделки под защитой!"
     ),
     "maintenance_message": (
@@ -88,7 +88,7 @@ RU_TEXTS = {
     "payment_confirmed_seller_message": (
         "<b>🔔 Оплата подтверждена для сделки #{deal_id}</b>\n\n"
         "📦 Описание: <i>{description}</i>\n\n"
-        "<i>Обязательно отправьте подарок менеджеру - @GiftGuarantorsmanager</i>\n\n"
+        "<i>Обязательно отправьте подарок менеджеру - @GiftGuarantormanager</i>\n\n"
         "<b>⚠️ Отправляйте товар только тому, кто указан здесь. В случае отправки другому аккаунту возврата не будет. Обязательно записывайте на видео момент передачи.</b>"
     ),
     "seller_notification_message": (
@@ -166,7 +166,7 @@ RU_TEXTS = {
         "<i>Для пополнения баланса переведите TON на адрес:</i>\n"
         "<code>UQCVtk2BALaNDCMpnKsxNOAQ9mrRFdP3F1CglWyWUIeUEcG2</code>\n\n"
         "<i>После перевода обязательно отправьте скриншот в поддержку для зачисления средств.</i>\n\n"
-        "📞 Поддержка: @GiftGuarantorsmanager"
+        "📞 Поддержка: @GiftGuarantormanager"
     ),
     "deposit_card_unavailable": "❌ Пополнение картой временно недоступно.",
     "withdraw_limit": "❌ Недостаточно средств на балансе.",
@@ -195,7 +195,7 @@ RU_TEXTS = {
         "• 💎 Проверенные продавцы\n"
         "• 📞 24/7 Поддержка\n"
         "• ⭐️ 99.8% положительных отзывов</blockquote>\n\n"
-        "📞 Поддержка: @GiftGuarantorsmanager\n\n"
+        "📞 Поддержка: @GiftGuarantormanager\n\n"
         "<blockquote>Информация обновляется каждые 5 минут</blockquote>"
     ),
     "error_occurred": "Произошла ошибка. Попробуйте позже.",
@@ -262,7 +262,7 @@ EN_TEXTS = {
     "payment_confirmed_seller_message": (
         "<b>🔔 Payment confirmed for deal #{deal_id}</b>\n\n"
         "📦 Description: <i>{description}</i>\n\n"
-        "<i>Be sure to send a gift to the manager - @GiftGuarantorsmanager</i>\n\n"
+        "<i>Be sure to send a gift to the manager - @GiftGuarantormanager</i>\n\n"
         "<b>⚠️ Send the item only to the person specified here. If you send the item to someone else, there will be no refund. Be sure to record the transfer on video.</b>"
     ),
     "seller_notification_message": (
@@ -340,7 +340,7 @@ EN_TEXTS = {
         "<i>To top up your balance, transfer TON to the address:</i>\n"
         "<code>UQCVtk2BALaNDCMpnKsxNOAQ9mrRFdP3F1CglWyWUIeUEcG2</code>\n\n"
         "<i>After the transfer, be sure to send a screenshot to support for fund crediting.</i>\n\n"
-        "📞 Support: @GiftGuarantorsmanager"
+        "📞 Support: @GiftGuarantormanager"
     ),
     "deposit_card_unavailable": "❌ Card deposit is temporarily unavailable.",
     "withdraw_unavailable": "❌ Withdrawals are temporarily unavailable.",
@@ -368,7 +368,7 @@ EN_TEXTS = {
         "• 💎 Verified sellers\n"
         "• 📞 24/7 Support\n"
         "• ⭐️ 99.8% positive reviews</blockquote>\n\n"
-        "📞 Support: @GiftGuarantorsmanager\n\n"
+        "📞 Support: @GiftGuarantormanager\n\n"
         "<blockquote>Information is updated every 5 minutes</blockquote>"
     ),
     "error_occurred": "An error occurred. Please try again later.",
@@ -578,7 +578,7 @@ def get_main_menu(lang):
     )
     builder.row(
         InlineKeyboardButton(text=get_text(lang, "about_button"), callback_data="about"),
-        InlineKeyboardButton(text=get_text(lang, "support_button"), url="https://t.me/GiftGuarantorsmanager")
+        InlineKeyboardButton(text=get_text(lang, "support_button"), url="https://t.me/GiftGuarantormanager")
     )
     return builder.as_markup()
 
@@ -626,6 +626,17 @@ async def cmd_start(message: types.Message, state: FSMContext, bot: Bot, command
     if args and args in deals:
         deal_id = args
         deal = deals[deal_id]
+
+        if deal.get('seller_id') == user_id or deal.get('buyer_id') == user_id:
+            builder = InlineKeyboardBuilder()
+            builder.row(InlineKeyboardButton(text=get_text(lang, "menu_button"), callback_data="menu"))
+            await message.answer(
+                "<b>❌ Вы не можете зайти в свою собственную сделку!</b>",
+                reply_markup=builder.as_markup(),
+                parse_mode=ParseMode.HTML
+            )
+            return
+    
         currency = deal.get('currency', 'TON')
         symbol = CURRENCIES.get(currency, "TON")
 
