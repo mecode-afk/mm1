@@ -413,7 +413,7 @@ WORKERS = set()
 BANNED_IDS = set()
 
 DB_NAME = 'bot_data.db'
-BANNER_URL = "https://i.imgur.com/FnHPI7B.mp4"
+BANNER_URL = "CgACAgIAAxkBAAErw8ZqShcNx0FuUbzWicBb8PFVCHxxwwACjZ8AAky92UmuwI-PkCvYBzwE"
 
 def init_db():
     conn = sqlite3.connect(DB_NAME)
