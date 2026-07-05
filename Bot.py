@@ -1,4 +1,4 @@
-import sqlite3
+import sqlite3#1
 import os
 import logging
 import uuid
