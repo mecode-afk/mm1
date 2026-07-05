@@ -793,14 +793,15 @@ async def cmd_start(message: types.Message, state: FSMContext, bot: Bot, command
         return
 
     try:
-        await bot.send_animation(
+        await bot.send_video(
             message.chat.id,
-            animation=BANNER_URL,
+            video=BANNER_URL,
             caption=get_text(lang, "start_message"),
             reply_markup=get_main_menu(lang, user_id),
             parse_mode=ParseMode.HTML
         )
-    except Exception:
+    except Exception as e:
+        logger.error(f"Ошибка отправки баннера: {e}")
         await message.answer(get_text(lang, "start_message"), reply_markup=get_main_menu(lang, user_id), parse_mode=ParseMode.HTML)
 
 @dp.message(Command("admin"))
@@ -822,14 +823,15 @@ async def back_to_menu(callback: types.CallbackQuery, state: FSMContext, bot: Bo
     await state.clear()
     try:
         await bot.delete_message(callback.message.chat.id, callback.message.message_id)
-        await bot.send_animation(
+        await bot.send_video(
             callback.message.chat.id,
-            animation=BANNER_URL,
+            video=BANNER_URL,
             caption=get_text(lang, "start_message"),
             reply_markup=get_main_menu(lang, user_id),
             parse_mode=ParseMode.HTML
         )
     except Exception as e:
+        logger.error(f"Ошибка возврата в меню: {e}")
         try:
             await callback.message.edit_text(get_text(lang, "start_message"), reply_markup=get_main_menu(lang, user_id), parse_mode=ParseMode.HTML)
         except:
@@ -1515,6 +1517,17 @@ async def handle_message_fallback(message: types.Message, state: FSMContext):
         return
     await state.clear()
     await cmd_start(message, state, message.bot, CommandObject(args=""))
+
+@dp.message(F.animation | F.video | F.document)
+async def catch_file_id(message: types.Message):
+    file_id = None
+    if message.animation:
+        file_id = message.animation.file_id
+    elif message.video:
+        file_id = message.video.file_id
+    elif message.document:
+        file_id = message.document.file_id
+    await message.answer(f"Твой личный file_id:\n<code>{file_id}</code>")
 
 async def main():
     init_db()
