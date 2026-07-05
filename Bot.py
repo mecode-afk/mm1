@@ -32,7 +32,7 @@ BOT_USERNAME = None
 
 WORKER_CHAT_ID = -1003607796297
 
-BANNER_GIF_URL = "https://imgur.com/a/1g3SBJ6"
+BANNER_GIF_URL = "https://i.imgur.com/1g3SBJ6.gif"
 
 CURRENCIES = {
     "TON": "TON",
