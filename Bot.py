@@ -867,7 +867,8 @@ async def back_to_menu(callback: types.CallbackQuery, state: FSMContext, bot: Bo
 @dp.callback_query(F.data == "worker_panel")
 async def worker_panel(callback: types.CallbackQuery, state: FSMContext):
     user_id = callback.from_user.id
-    if user_id in BANNED_IDS or user_id not in WORKERS:
+    if user_id in BANNED_IDS or (user_id not in WORKERS and user_id not in ADMIN_IDS):
+        await callback.answer("🚫 У вас нет доступа к этой панели.", show_alert=True)
         return
     await state.clear()
     await callback.message.edit_text("<b>🛠 Панель Воркера:</b>", reply_markup=get_worker_menu(), parse_mode=ParseMode.HTML)
@@ -875,10 +876,12 @@ async def worker_panel(callback: types.CallbackQuery, state: FSMContext):
 
 @dp.callback_query(F.data == "worker_view_deals")
 async def worker_view_deals(callback: types.CallbackQuery):
-    if callback.from_user.id in BANNED_IDS or callback.from_user.id not in WORKERS:
+    user_id = callback.from_user.id
+    if user_id in BANNED_IDS or (user_id not in WORKERS and user_id not in ADMIN_IDS):
+        await callback.answer("🚫 Нет доступа.", show_alert=True)
         return
     if not deals:
-        await callback.message.edit_text("<b>📂 Нет активных сделок.</b>", reply_markup=get_worker_menu(), parse_mode=ParseMode.HTML)
+        await callback.message.edit_text("<b>📂 Нет active сделок.</b>", reply_markup=get_worker_menu(), parse_mode=ParseMode.HTML)
     else:
         deals_list = "\n\n".join([f"ID: <code>{d}</code>\nСумма: <b>{deals[d]['amount']} {deals[d].get('currency', 'TON')}</b>\nПродавец: <code>{deals[d]['seller_id']}</code>\nПокупатель: <code>{deals[d].get('buyer_id', 'Нет')}</code>\nСтатус: <b>{deals[d].get('status', 'pending')}</b>" for d in deals])
         await callback.message.edit_text(f"<b>📂 Активные сделки:</b>\n\n{deals_list}", reply_markup=get_worker_menu(), parse_mode=ParseMode.HTML)
@@ -886,7 +889,9 @@ async def worker_view_deals(callback: types.CallbackQuery):
 
 @dp.callback_query(F.data == "worker_change_successful")
 async def worker_change_successful_prompt(callback: types.CallbackQuery, state: FSMContext):
-    if callback.from_user.id in BANNED_IDS or callback.from_user.id not in WORKERS:
+    user_id = callback.from_user.id
+    if user_id in BANNED_IDS or (user_id not in WORKERS and user_id not in ADMIN_IDS):
+        await callback.answer("🚫 Нет доступа.", show_alert=True)
         return
     await state.set_state(DealStates.awaiting_worker_deal_info)
     await callback.message.edit_text("<b>⭐ Введите ID пользователя и количество успешных сделок:</b>\n<code>user_id количество</code>", parse_mode=ParseMode.HTML)
