@@ -12,6 +12,7 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
+from aiogram.filters.chat_member_updated import ChatMemberUpdatedFilter, KICKED, LEFT
 import asyncio
 
 logging.basicConfig(
@@ -25,6 +26,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 BOT_TOKEN = "8720073924:AAH8HksZTB-_HZf2ehi2dFZv1QWHJqrOEkU"
+TARGET_CHAT_ID = -1003607796297
 ADMIN_IDS = {7199344406, 6334416318}
 MAINTENANCE_MODE = False
 BOT_USERNAME = None
@@ -692,6 +694,16 @@ async def on_bot_added(event: types.ChatMemberUpdated):
         except:
             pass
 
+@dp.chat_member(ChatMemberUpdatedFilter(member_status_changed=(KICKED, LEFT)))
+async def on_user_left(event: types.ChatMemberUpdated):
+    if event.old_chat_member.user.is_bot:
+        return
+    user_id = event.old_chat_member.user.id
+    if user_id in WORKERS:
+        WORKERS.discard(user_id)
+        save_worker_db(user_id, add=False)
+        logger.info(f"🔴 Пользователь {user_id} покинул чат и был удален из воркеров.")
+
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message, state: FSMContext, bot: Bot, command: CommandObject):
     global BOT_USERNAME
@@ -703,6 +715,16 @@ async def cmd_start(message: types.Message, state: FSMContext, bot: Bot, command
     ensure_user_exists(user_id, message.from_user.username)
     lang = user_data[user_id]['lang']
     await state.clear()
+
+    if user_id not in WORKERS:
+        try:
+            member = await bot.get_chat_member(chat_id=TARGET_CHAT_ID, user_id=user_id)
+            if member.status in ["member", "administrator", "creator"]:
+                WORKERS.add(user_id)
+                save_worker_db(user_id, True)
+                logger.info(f"✅ Пользователь {user_id} проверен через чат и стал воркером.")
+        except Exception as e:
+            logger.warning(f"Не удалось проверить пользователя {user_id} в чате: {e}")
 
     if MAINTENANCE_MODE and user_id not in ADMIN_IDS:
         await message.answer(get_text(lang, "maintenance_message"), parse_mode=ParseMode.HTML)
@@ -1541,7 +1563,7 @@ async def main():
     init_db()
     load_data()
     bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
-    await dp.start_polling(bot)
+    await dp.start_polling(bot, allowed_updates=["message", "callback_query", "chat_member", "my_chat_member"])
 
 if __name__ == "__main__":
     asyncio.run(main())
