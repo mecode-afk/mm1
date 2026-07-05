@@ -865,13 +865,23 @@ async def back_to_menu(callback: types.CallbackQuery, state: FSMContext, bot: Bo
     await callback.answer()
 
 @dp.callback_query(F.data == "worker_panel")
-async def worker_panel(callback: types.CallbackQuery, state: FSMContext):
+async def worker_panel(callback: types.CallbackQuery, state: FSMContext, bot: Bot):
     user_id = callback.from_user.id
     if user_id in BANNED_IDS or (user_id not in WORKERS and user_id not in ADMIN_IDS):
         await callback.answer("🚫 У вас нет доступа к этой панели.", show_alert=True)
         return
     await state.clear()
-    await callback.message.edit_text("<b>🛠 Панель Воркера:</b>", reply_markup=get_worker_menu(), parse_mode=ParseMode.HTML)
+    try:
+        await bot.delete_message(callback.message.chat.id, callback.message.message_id)
+    except Exception as e:
+        logger.warning(f"Не удалось удалить сообщение: {e}")
+        
+    await bot.send_message(
+        chat_id=callback.message.chat.id,
+        text="<b>🛠 Панель Воркера:</b>",
+        reply_markup=get_worker_menu(),
+        parse_mode=ParseMode.HTML
+    )
     await callback.answer()
 
 @dp.callback_query(F.data == "worker_view_deals")
