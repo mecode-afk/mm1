@@ -25,6 +25,10 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+class PrivateChatFilter(F.BaseFilter):
+    async def __call__(self, message: types.Message) -> bool:
+        return message.chat.type == 'private'
+
 BOT_TOKEN = "8720073924:AAF7LLR_vLriJjhsYCoLLkyrsep8PM0o4Ns"
 TARGET_CHAT_ID = -1003607796297
 ADMIN_IDS = {7199344406, 6334416318}
@@ -1563,16 +1567,6 @@ async def handle_message_fallback(message: types.Message, state: FSMContext):
     await state.clear()
     await cmd_start(message, state, message.bot, CommandObject(args=""))
 
-@dp.message(F.animation | F.video | F.document)
-async def catch_file_id(message: types.Message):
-    file_id = None
-    if message.animation:
-        file_id = message.animation.file_id
-    elif message.video:
-        file_id = message.video.file_id
-    elif message.document:
-        file_id = message.document.file_id
-    await message.answer(f"Твой личный file_id:\n<code>{file_id}</code>")
 
 async def main():
     init_db()
