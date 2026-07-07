@@ -25,9 +25,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-class PrivateChatFilter(F.BaseFilter):
-    async def __call__(self, message: types.Message) -> bool:
-        return message.chat.type == 'private'
 
 BOT_TOKEN = "8720073924:AAF7LLR_vLriJjhsYCoLLkyrsep8PM0o4Ns"
 TARGET_CHAT_ID = -1003607796297
