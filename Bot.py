@@ -4,8 +4,9 @@ import logging
 import uuid
 from urllib.parse import quote
 
-from aiogram import Bot, Dispatcher, types, F
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram import Bot, Dispatcher, types, F, BaseMiddleware
+from typing import Callable, Dict, Any, Awaitable
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, Message, ChatType
 from aiogram.filters import Command, CommandObject
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -400,6 +401,35 @@ EN_TEXTS = {
     ),
 }
 
+
+class PrivateChatMiddleware(BaseMiddleware):
+    async def __call__(
+        self,
+        handler: Callable[[types.Message, Dict[str, Any]], Awaitable[Any]],
+        event: types.Message,
+        data: Dict[str, Any]
+    ) -> Any:
+        if event.chat.type in ["group", "supergroup", "channel"]:
+            logger.debug(f"Сообщение из {event.chat.type} игнорируется: {event.chat.id}")
+            return  
+
+        return await handler(event, data)
+
+
+class PrivateCallbackMiddleware(BaseMiddleware):
+    async def __call__(
+        self,
+        handler: Callable[[types.CallbackQuery, Dict[str, Any]], Awaitable[Any]],
+        event: types.CallbackQuery,
+        data: Dict[str, Any]
+    ) -> Any:
+        if event.message and event.message.chat.type in ["group", "supergroup", "channel"]:
+            logger.debug(f"Callback из {event.message.chat.type} игнорируется")
+            return
+
+        return await handler(event, data)
+
+
 class DealStates(StatesGroup):
     awaiting_wallet = State()
     awaiting_deal_wallet = State()
@@ -651,6 +681,14 @@ def get_worker_menu():
     return builder.as_markup()
 
 dp = Dispatcher()
+
+dp.message.middleware(PrivateChatMiddleware())
+dp.callback_query.middleware(PrivateCallbackMiddleware())
+
+
+@dp.message(F.chat.type.in_({"group", "supergroup"}))
+async def ignore_group_messages(message: types.Message):
+    pass  
 
 @dp.message(Command("ban"))
 async def cmd_ban(message: types.Message):
