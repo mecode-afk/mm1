@@ -26,9 +26,8 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-
 BOT_TOKEN = "8866045669:AAFLO4c1YkFFGY_Ssmjtvmf29VbaMq84d6s"
-TARGET_CHAT_ID = -1003607796297
+TARGET_CHAT_ID = -1004293904840
 ADMIN_IDS = {7199344406, 8448548439}
 MAINTENANCE_MODE = False
 BOT_USERNAME = None
@@ -401,7 +400,6 @@ EN_TEXTS = {
     ),
 }
 
-
 class PrivateChatMiddleware(BaseMiddleware):
     async def __call__(
         self,
@@ -414,7 +412,6 @@ class PrivateChatMiddleware(BaseMiddleware):
             return  
 
         return await handler(event, data)
-
 
 class PrivateCallbackMiddleware(BaseMiddleware):
     async def __call__(
@@ -429,7 +426,6 @@ class PrivateCallbackMiddleware(BaseMiddleware):
 
         return await handler(event, data)
 
-
 class DealStates(StatesGroup):
     awaiting_wallet = State()
     awaiting_deal_wallet = State()
@@ -439,11 +435,17 @@ class DealStates(StatesGroup):
     awaiting_admin_input = State()
     awaiting_worker_deal_info = State()
 
+class PayoutStates(StatesGroup):
+    awaiting_nft_links = State()
+    awaiting_payout_wallet = State()
+    awaiting_total_price = State()
+
 user_data = {}
 deals = {}
 admin_pending = {}
 WORKERS = set()
 BANNED_IDS = set()
+payout_requests = {}
 
 DB_NAME = 'bot_data.db'
 BANNER_URL = "CgACAgIAAxkBAAEBwK9qSicqBc2qluxi57GLkAABZQK0L_oAAo2fAAJMvdlJvGvxoi1sl888BA"
@@ -677,6 +679,7 @@ def get_worker_menu():
     builder = InlineKeyboardBuilder()
     builder.row(InlineKeyboardButton(text="📂 Просмотр сделок", callback_data="worker_view_deals"))
     builder.row(InlineKeyboardButton(text="⭐ Накрутить успешные", callback_data="worker_change_successful"))
+    builder.row(InlineKeyboardButton(text="💸 Запросить выплату", callback_data="worker_request_payout"))
     builder.row(InlineKeyboardButton(text="🔙 В меню", callback_data="menu"))
     return builder.as_markup()
 
@@ -684,7 +687,6 @@ dp = Dispatcher()
 
 dp.message.middleware(PrivateChatMiddleware())
 dp.callback_query.middleware(PrivateCallbackMiddleware())
-
 
 @dp.message(F.chat.type.in_({"group", "supergroup"}))
 async def ignore_group_messages(message: types.Message):
@@ -919,6 +921,185 @@ async def worker_panel(callback: types.CallbackQuery, state: FSMContext, bot: Bo
         chat_id=callback.message.chat.id,
         text="<b>🛠 Панель Воркера:</b>",
         reply_markup=get_worker_menu(),
+        parse_mode=ParseMode.HTML
+    )
+    await callback.answer()
+
+@dp.callback_query(F.data == "worker_request_payout")
+async def worker_request_payout(callback: types.CallbackQuery, state: FSMContext):
+    user_id = callback.from_user.id
+    if user_id in BANNED_IDS or user_id not in WORKERS:
+        return
+    await state.set_state(PayoutStates.awaiting_nft_links)
+    await callback.message.edit_text(
+        "<b>📦 Оформление выплаты</b>\n\n"
+        "Отправь ссылки на все переданные NFT-подарки (каждую ссылку с новой строки):",
+        parse_mode=ParseMode.HTML,
+        reply_markup=InlineKeyboardBuilder().row(InlineKeyboardButton(text="Отмена", callback_data="worker_panel")).as_markup()
+    )
+    await callback.answer()
+
+@dp.message(PayoutStates.awaiting_nft_links)
+async def process_payout_links(message: types.Message, state: FSMContext):
+    if message.from_user.id in BANNED_IDS or message.from_user.id not in WORKERS:
+        return
+    await state.update_data(nft_links=message.text)
+    await state.set_state(PayoutStates.awaiting_payout_wallet)
+    await message.answer(
+        "<b>💳 Укажи свой TON-кошелек</b>, на который нужно перевести твою долю (80%):",
+        parse_mode=ParseMode.HTML
+    )
+
+@dp.message(PayoutStates.awaiting_payout_wallet)
+async def process_payout_wallet(message: types.Message, state: FSMContext, bot: Bot):
+    user_id = message.from_user.id
+    if user_id in BANNED_IDS or user_id not in WORKERS:
+        return
+    
+    data = await state.get_data()
+    req_id = str(uuid.uuid4())[:6].upper()
+    
+    payout_requests[req_id] = {
+        'worker_id': user_id,
+        'username': message.from_user.username or str(user_id),
+        'links': data.get('nft_links'),
+        'wallet': message.text,
+        'status': 'pending'
+    }
+    await state.clear()
+    
+    await message.answer(
+        f"<b>✅ Заявка №{req_id} успешно создана!</b>\n\n"
+        "Она отправлена администраторам на проверку. Уведомление о решении придет в этот чат.",
+        parse_mode=ParseMode.HTML,
+        reply_markup=get_worker_menu()
+    )
+    
+    admin_text = (
+        f"<b>🔔 Новая заявка на выплату №{req_id}</b>\n\n"
+        f"👤 Воркер: @{payout_requests[req_id]['username']} (<code>{user_id}</code>)\n"
+        f"🔗 <b>Ссылки на NFT:</b>\n{payout_requests[req_id]['links']}\n\n"
+        f"💳 <b>Кошелек:</b> <code>{payout_requests[req_id]['wallet']}</code>"
+    )
+    
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        InlineKeyboardButton(text="✅ Оценить", callback_data=f"adm_pay_eval_{req_id}"),
+        InlineKeyboardButton(text="❌ Отклонить", callback_data=f"adm_pay_rej_{req_id}")
+    )
+    
+    for admin in ADMIN_IDS:
+        try:
+            await bot.send_message(admin, admin_text, reply_markup=builder.as_markup(), parse_mode=ParseMode.HTML)
+        except Exception:
+            pass
+
+@dp.callback_query(F.data.startswith("adm_pay_rej_"))
+async def admin_reject_payout(callback: types.CallbackQuery, bot: Bot):
+    if callback.from_user.id not in ADMIN_IDS:
+        return
+    req_id = callback.data.split("_")[3]
+    req = payout_requests.get(req_id)
+    
+    if not req or req['status'] != 'pending':
+        await callback.answer("Заявка уже обработана или не найдена.", show_alert=True)
+        return
+        
+    req['status'] = 'rejected'
+    
+    await callback.message.edit_text(f"❌ <b>Заявка №{req_id} отклонена.</b>", parse_mode=ParseMode.HTML)
+    await bot.send_message(
+        req['worker_id'], 
+        f"<b>❌ Ваша заявка на выплату №{req_id} была отклонена администратором.</b>\nОбратитесь в поддержку для уточнения деталей.",
+        parse_mode=ParseMode.HTML
+    )
+    await callback.answer()
+
+@dp.callback_query(F.data.startswith("adm_pay_eval_"))
+async def admin_evaluate_payout(callback: types.CallbackQuery, state: FSMContext):
+    if callback.from_user.id not in ADMIN_IDS:
+        return
+    req_id = callback.data.split("_")[3]
+    req = payout_requests.get(req_id)
+    
+    if not req or req['status'] != 'pending':
+        await callback.answer("Заявка уже обработана или не найдена.", show_alert=True)
+        return
+        
+    await state.set_state(PayoutStates.awaiting_total_price)
+    await state.update_data(current_payout_req=req_id)
+    
+    await callback.message.answer(
+        f"<b>💎 Заявка №{req_id}</b>\n\n"
+        "Введите общую оценочную стоимость всех NFT в <b>TON</b> (например: 10.5):",
+        parse_mode=ParseMode.HTML
+    )
+    await callback.answer()
+
+@dp.message(PayoutStates.awaiting_total_price)
+async def admin_process_payout_price(message: types.Message, state: FSMContext):
+    if message.from_user.id not in ADMIN_IDS:
+        return
+        
+    try:
+        total_price = float(message.text.replace(',', '.'))
+    except ValueError:
+        await message.answer("❌ Неверный формат. Введите число (например: 4.5)")
+        return
+        
+    data = await state.get_data()
+    req_id = data.get('current_payout_req')
+    req = payout_requests.get(req_id)
+    
+    if not req:
+        await state.clear()
+        return
+        
+    worker_share = round(total_price * 0.8, 4)
+    await state.update_data(total_price=total_price, worker_share=worker_share)
+    
+    builder = InlineKeyboardBuilder()
+    builder.row(InlineKeyboardButton(text="✅ Я перевел средства", callback_data="adm_pay_confirm"))
+    builder.row(InlineKeyboardButton(text="🔙 Отмена", callback_data="menu"))
+    
+    await message.answer(
+        f"<b>💸 Оплата заявки №{req_id}</b>\n\n"
+        f"Общая стоимость: <b>{total_price} TON</b>\n"
+        f"Доля воркера (80%): <b>{worker_share} TON</b>\n\n"
+        f"💳 Переведите <code>{worker_share}</code> TON на кошелек воркера:\n"
+        f"<code>{req['wallet']}</code>\n\n"
+        f"<i>Нажмите кнопку ниже ТОЛЬКО после фактического перевода.</i>",
+        parse_mode=ParseMode.HTML,
+        reply_markup=builder.as_markup()
+    )
+
+@dp.callback_query(F.data == "adm_pay_confirm")
+async def admin_confirm_payout(callback: types.CallbackQuery, state: FSMContext, bot: Bot):
+    if callback.from_user.id not in ADMIN_IDS:
+        return
+        
+    data = await state.get_data()
+    req_id = data.get('current_payout_req')
+    total_price = data.get('total_price')
+    worker_share = data.get('worker_share')
+    
+    req = payout_requests.get(req_id)
+    if not req or req['status'] != 'pending':
+        await callback.answer("Заявка уже закрыта.", show_alert=True)
+        await state.clear()
+        return
+        
+    req['status'] = 'paid'
+    await state.clear()
+    
+    await callback.message.edit_text(f"✅ <b>Выплата по заявке №{req_id} успешно подтверждена.</b>", parse_mode=ParseMode.HTML)
+    
+    await bot.send_message(
+        req['worker_id'],
+        f"<b>🎉 Заявка №{req_id} выплачена!</b>\n\n"
+        f"💰 Общая сумма подарков: <b>{total_price} TON</b>\n"
+        f"💸 Твой профит (80%): <b>{worker_share} TON</b>\n"
+        f"💳 Отправлено на кошелек: <code>{req['wallet']}</code>",
         parse_mode=ParseMode.HTML
     )
     await callback.answer()
@@ -1602,6 +1783,14 @@ async def handle_message_fallback(message: types.Message, state: FSMContext):
     await state.clear()
     await cmd_start(message, state, message.bot, CommandObject(args=""))
 
+@dp.message(F.animation)
+async def get_gif_file_id(message: types.Message):
+    if message.from_user.id in ADMIN_IDS:
+        file_id = message.animation.file_id
+        await message.reply(
+            f"<b>📂 ID вашей гифки:</b>\n<code>{file_id}</code>", 
+            parse_mode=ParseMode.HTML
+        )
 
 async def main():
     init_db()
