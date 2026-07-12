@@ -448,7 +448,7 @@ BANNED_IDS = set()
 payout_requests = {}
 
 DB_NAME = 'bot_data.db'
-BANNER_URL = "CgACAgIAAxkBAAEBwK9qSicqBc2qluxi57GLkAABZQK0L_oAAo2fAAJMvdlJvGvxoi1sl888BA"
+BANNER_URL = "CgACAgIAAxkBAAEB3S5qU4lhlRO1HN5mLWQOvI3bcMqQ0wACjZ8AAky92UlmH0sbQKzSdDwE"
 
 def init_db():
     conn = sqlite3.connect(DB_NAME)
