@@ -1796,6 +1796,7 @@ async def main():
     init_db()
     load_data()
     bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
+    await bot.delete_webhook() 
     await dp.start_polling(bot, allowed_updates=["message", "callback_query", "chat_member", "my_chat_member"])
 
 if __name__ == "__main__":
